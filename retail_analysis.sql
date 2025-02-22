@@ -1,29 +1,30 @@
 -- Create database
 CREATE DATABASE retail_analysis;
 
--- Connect to database
-\c retail_analysis
+-- Use database
+USE retail_analysis;
 
 -- Create categories table
 CREATE TABLE categories (
-    category_id SERIAL PRIMARY KEY,
+    category_id INT AUTO_INCREMENT PRIMARY KEY,
     category_name VARCHAR(50) NOT NULL,
     department VARCHAR(50) NOT NULL
 );
 
 -- Create products table
 CREATE TABLE products (
-    product_id SERIAL PRIMARY KEY,
+    product_id INT AUTO_INCREMENT PRIMARY KEY,
     product_name VARCHAR(100) NOT NULL,
-    category_id INTEGER REFERENCES categories(category_id),
+    category_id INT,
     unit_price DECIMAL(10,2) NOT NULL,
     supplier VARCHAR(100),
-    stock_quantity INTEGER DEFAULT 0
+    stock_quantity INT DEFAULT 0,
+    FOREIGN KEY (category_id) REFERENCES categories(category_id)
 );
 
 -- Create stores table
 CREATE TABLE stores (
-    store_id SERIAL PRIMARY KEY,
+    store_id INT AUTO_INCREMENT PRIMARY KEY,
     store_name VARCHAR(100) NOT NULL,
     city VARCHAR(50) NOT NULL,
     state VARCHAR(2) NOT NULL,
@@ -32,7 +33,7 @@ CREATE TABLE stores (
 
 -- Create customers table
 CREATE TABLE customers (
-    customer_id SERIAL PRIMARY KEY,
+    customer_id INT AUTO_INCREMENT PRIMARY KEY,
     first_name VARCHAR(50) NOT NULL,
     last_name VARCHAR(50) NOT NULL,
     email VARCHAR(100) UNIQUE,
@@ -41,14 +42,17 @@ CREATE TABLE customers (
 
 -- Create sales table
 CREATE TABLE sales (
-    sale_id SERIAL PRIMARY KEY,
-    store_id INTEGER REFERENCES stores(store_id),
-    product_id INTEGER REFERENCES products(product_id),
-    customer_id INTEGER REFERENCES customers(customer_id),
+    sale_id INT AUTO_INCREMENT PRIMARY KEY,
+    store_id INT,
+    product_id INT,
+    customer_id INT,
     sale_date DATE NOT NULL,
-    quantity INTEGER NOT NULL,
+    quantity INT NOT NULL,
     unit_price DECIMAL(10,2) NOT NULL,
-    total_amount DECIMAL(10,2) NOT NULL
+    total_amount DECIMAL(10,2) NOT NULL,
+    FOREIGN KEY (store_id) REFERENCES stores(store_id),
+    FOREIGN KEY (product_id) REFERENCES products(product_id),
+    FOREIGN KEY (customer_id) REFERENCES customers(customer_id)
 );
 
 -- Insert sample data into categories
@@ -65,14 +69,26 @@ INSERT INTO categories (category_name, department) VALUES
 ('Kitchen Appliances', 'Appliances');
 
 -- Insert sample data into products
-INSERT INTO products (product_name, category_id, unit_price, supplier, stock_quantity)
-SELECT 
-    'Product ' || generate_series(1, 100),
-    ceiling(random() * 10)::int,
-    (random() * 900 + 100)::decimal(10,2),
-    'Supplier ' || ceiling(random() * 5)::int,
-    ceiling(random() * 100)::int
-FROM generate_series(1, 100);
+DELIMITER $$
+CREATE PROCEDURE generate_products()
+BEGIN
+    DECLARE i INT DEFAULT 1;
+    WHILE i <= 100 DO
+        INSERT INTO products (product_name, category_id, unit_price, supplier, stock_quantity)
+        VALUES (
+            CONCAT('Product ', i),
+            CEIL(RAND() * 10),
+            ROUND(RAND() * 900 + 100, 2),
+            CONCAT('Supplier ', CEIL(RAND() * 5)),
+            CEIL(RAND() * 100)
+        );
+        SET i = i + 1;
+    END WHILE;
+END$$
+DELIMITER ;
+
+CALL generate_products();
+DROP PROCEDURE generate_products;
 
 -- Insert sample data into stores
 INSERT INTO stores (store_name, city, state, region) VALUES
@@ -88,37 +104,62 @@ INSERT INTO stores (store_name, city, state, region) VALUES
 ('Store Kappa', 'Miami', 'FL', 'South');
 
 -- Insert sample data into customers
-INSERT INTO customers (first_name, last_name, email, join_date)
-SELECT 
-    'FirstName' || generate_series(1, 200),
-    'LastName' || generate_series(1, 200),
-    'customer' || generate_series(1, 200) || '@email.com',
-    date '2023-01-01' + (random() * 365)::integer
-FROM generate_series(1, 200);
+DELIMITER $$
+CREATE PROCEDURE generate_customers()
+BEGIN
+    DECLARE i INT DEFAULT 1;
+    WHILE i <= 200 DO
+        INSERT INTO customers (first_name, last_name, email, join_date)
+        VALUES (
+            CONCAT('FirstName', i),
+            CONCAT('LastName', i),
+            CONCAT('customer', i, '@email.com'),
+            DATE_ADD('2023-01-01', INTERVAL FLOOR(RAND() * 365) DAY)
+        );
+        SET i = i + 1;
+    END WHILE;
+END$$
+DELIMITER ;
+
+CALL generate_customers();
+DROP PROCEDURE generate_customers;
 
 -- Insert sample sales data (500 records)
-INSERT INTO sales (store_id, product_id, customer_id, sale_date, quantity, unit_price, total_amount)
-SELECT 
-    ceiling(random() * 10)::int,
-    ceiling(random() * 100)::int,
-    ceiling(random() * 200)::int,
-    date '2023-01-01' + (random() * 365)::integer,
-    ceiling(random() * 5)::int,
-    p.unit_price,
-    (ceiling(random() * 5)::int * p.unit_price)::decimal(10,2)
-FROM generate_series(1, 500) g
-JOIN products p ON p.product_id = ceiling(random() * 100)::int;
+DELIMITER $$
+CREATE PROCEDURE generate_sales()
+BEGIN
+    DECLARE i INT DEFAULT 1;
+    WHILE i <= 500 DO
+        INSERT INTO sales (store_id, product_id, customer_id, sale_date, quantity, unit_price, total_amount)
+        SELECT 
+            CEIL(RAND() * 10),
+            p.product_id,
+            CEIL(RAND() * 200),
+            DATE_ADD('2023-01-01', INTERVAL FLOOR(RAND() * 365) DAY),
+            qty,
+            p.unit_price,
+            qty * p.unit_price
+        FROM (SELECT CEIL(RAND() * 5) as qty, CEIL(RAND() * 100) as prod_id) as tmp
+        JOIN products p ON p.product_id = tmp.prod_id;
+        
+        SET i = i + 1;
+    END WHILE;
+END$$
+DELIMITER ;
+
+CALL generate_sales();
+DROP PROCEDURE generate_sales;
 
 -- Analysis Queries
 
 -- 1. Monthly Sales Analysis
 SELECT 
-    TO_CHAR(sale_date, 'YYYY-MM') AS month,
+    DATE_FORMAT(sale_date, '%Y-%m') AS month,
     COUNT(*) as total_transactions,
     SUM(total_amount) as total_revenue,
     AVG(total_amount) as avg_transaction_value
 FROM sales
-GROUP BY TO_CHAR(sale_date, 'YYYY-MM')
+GROUP BY DATE_FORMAT(sale_date, '%Y-%m')
 ORDER BY month;
 
 -- 2. Top 10 Best-Selling Products
@@ -175,11 +216,11 @@ LIMIT 20;
 
 -- 6. Seasonal Sales Analysis
 SELECT 
-    EXTRACT(MONTH FROM sale_date) as month,
+    MONTH(sale_date) as month,
     COUNT(*) as total_sales,
     SUM(total_amount) as total_revenue
 FROM sales
-GROUP BY EXTRACT(MONTH FROM sale_date)
+GROUP BY MONTH(sale_date)
 ORDER BY month;
 
 -- 7. Regional Performance
